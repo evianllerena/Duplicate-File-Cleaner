@@ -3,7 +3,7 @@ import os
 import threading
 import tkinter as tk
 from pathlib import Path
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
 
 APP_TITLE = "Duplicate File Cleaner"
 HASH_CHUNK_SIZE = 1024 * 1024
@@ -81,149 +81,21 @@ class DuplicateCleanerApp(tk.Tk):
         ttk.Label(bottom, textvariable=self.status_var).pack(side="left", padx=(10, 0))
 
     def browse_folder(self):
-        """Open a folder browser that also displays the files inside each folder."""
+        """Open the normal Windows Explorer-style file dialog and use the selected file's parent folder."""
         current = self.folder_var.get().strip()
         if current and Path(current).is_dir():
-            start = Path(current)
+            initial_dir = current
         else:
             documents = Path.home() / "Documents"
-            start = documents if documents.is_dir() else Path.home()
+            initial_dir = str(documents if documents.is_dir() else Path.home())
 
-        dialog = tk.Toplevel(self)
-        dialog.title("Select folder to scan")
-        dialog.geometry("820x560")
-        dialog.minsize(620, 420)
-        dialog.transient(self)
-        dialog.grab_set()
-
-        path_var = tk.StringVar(value=str(start))
-        current_dir = {"path": start}
-
-        top = ttk.Frame(dialog, padding=(10, 10, 10, 6))
-        top.pack(fill="x")
-
-        up_button = ttk.Button(top, text="Up")
-        up_button.pack(side="left")
-
-        path_entry = ttk.Entry(top, textvariable=path_var)
-        path_entry.pack(side="left", fill="x", expand=True, padx=(8, 0))
-
-        list_frame = ttk.Frame(dialog, padding=(10, 0, 10, 8))
-        list_frame.pack(fill="both", expand=True)
-
-        tree = ttk.Treeview(list_frame, columns=("type", "size"), show="tree headings")
-        tree.heading("#0", text="Name")
-        tree.heading("type", text="Type")
-        tree.heading("size", text="Size")
-        tree.column("#0", width=470, anchor="w")
-        tree.column("type", width=110, anchor="w")
-        tree.column("size", width=110, anchor="e")
-
-        scroll = ttk.Scrollbar(list_frame, orient="vertical", command=tree.yview)
-        tree.configure(yscrollcommand=scroll.set)
-        tree.pack(side="left", fill="both", expand=True)
-        scroll.pack(side="right", fill="y")
-
-        bottom = ttk.Frame(dialog, padding=(10, 0, 10, 10))
-        bottom.pack(fill="x")
-
-        selected_label = ttk.Label(bottom, text="Select the folder you want to scan.")
-        selected_label.pack(side="left", fill="x", expand=True)
-
-        cancel_button = ttk.Button(bottom, text="Cancel", command=dialog.destroy)
-        cancel_button.pack(side="right")
-
-        select_button = ttk.Button(bottom, text="Select Folder")
-        select_button.pack(side="right", padx=(0, 8))
-
-        def format_size(size):
-            units = ["B", "KB", "MB", "GB", "TB"]
-            value = float(size)
-            for unit in units:
-                if value < 1024 or unit == units[-1]:
-                    return f"{int(value)} {unit}" if unit == "B" else f"{value:.1f} {unit}"
-                value /= 1024
-
-        def load_directory(directory):
-            directory = Path(directory)
-            if not directory.is_dir():
-                return
-
-            current_dir["path"] = directory
-            path_var.set(str(directory))
-            tree.delete(*tree.get_children())
-
-            try:
-                entries = list(os.scandir(directory))
-            except OSError as exc:
-                messagebox.showerror(APP_TITLE, f"Could not open folder:\n{directory}\n\n{exc}", parent=dialog)
-                return
-
-            folders = []
-            files = []
-            for entry in entries:
-                try:
-                    if entry.is_dir(follow_symlinks=False):
-                        folders.append(entry)
-                    elif entry.is_file(follow_symlinks=True):
-                        files.append(entry)
-                except OSError:
-                    continue
-
-            folders.sort(key=lambda e: e.name.lower())
-            files.sort(key=lambda e: e.name.lower())
-
-            for entry in folders:
-                tree.insert("", "end", text=entry.name, values=("Folder", ""), tags=("folder",), iid=entry.path)
-
-            for entry in files:
-                try:
-                    size = format_size(entry.stat(follow_symlinks=True).st_size)
-                except OSError:
-                    size = ""
-                suffix = Path(entry.name).suffix
-                file_type = suffix[1:].upper() + " File" if suffix else "File"
-                tree.insert("", "end", text=entry.name, values=(file_type, size), tags=("file",), iid=entry.path)
-
-            selected_label.config(text=f"{len(files)} file(s), {len(folders)} folder(s) shown")
-
-        def go_up():
-            current = current_dir["path"]
-            parent = current.parent
-            if parent != current:
-                load_directory(parent)
-
-        def open_selected(_event=None):
-            selection = tree.selection()
-            if not selection:
-                return
-            selected = Path(selection[0])
-            if selected.is_dir():
-                load_directory(selected)
-
-        def select_folder():
-            selection = tree.selection()
-            if selection:
-                selected = Path(selection[0])
-                chosen = selected if selected.is_dir() else current_dir["path"]
-            else:
-                chosen = current_dir["path"]
-
-            self.folder_var.set(os.path.normpath(str(chosen)))
-            dialog.destroy()
-
-        def path_entered(_event=None):
-            entered = Path(path_var.get().strip())
-            if entered.is_dir():
-                load_directory(entered)
-
-        up_button.config(command=go_up)
-        select_button.config(command=select_folder)
-        tree.bind("<Double-1>", open_selected)
-        path_entry.bind("<Return>", path_entered)
-
-        load_directory(start)
-        dialog.wait_window()
+        selected = filedialog.askopenfilename(
+            title="Browse to the folder you want to scan, then select any file in it",
+            initialdir=initial_dir,
+            filetypes=[("All files", "*.*")],
+        )
+        if selected:
+            self.folder_var.set(os.path.normpath(str(Path(selected).parent)))
 
     def set_busy(self, busy):
         self._busy = busy
