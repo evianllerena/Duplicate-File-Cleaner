@@ -1,12 +1,49 @@
+import ctypes
 import hashlib
 import os
 import threading
 import tkinter as tk
+from ctypes import wintypes
 from pathlib import Path
-from tkinter import filedialog, messagebox, ttk
+from tkinter import messagebox, ttk
 
 APP_TITLE = "Duplicate File Cleaner"
 HASH_CHUNK_SIZE = 1024 * 1024
+
+
+class OPENFILENAMEW(ctypes.Structure):
+    _fields_ = [
+        ("lStructSize", wintypes.DWORD),
+        ("hwndOwner", wintypes.HWND),
+        ("hInstance", wintypes.HINSTANCE),
+        ("lpstrFilter", wintypes.LPCWSTR),
+        ("lpstrCustomFilter", wintypes.LPWSTR),
+        ("nMaxCustFilter", wintypes.DWORD),
+        ("nFilterIndex", wintypes.DWORD),
+        ("lpstrFile", wintypes.LPWSTR),
+        ("nMaxFile", wintypes.DWORD),
+        ("lpstrFileTitle", wintypes.LPWSTR),
+        ("nMaxFileTitle", wintypes.DWORD),
+        ("lpstrInitialDir", wintypes.LPCWSTR),
+        ("lpstrTitle", wintypes.LPCWSTR),
+        ("Flags", wintypes.DWORD),
+        ("nFileOffset", wintypes.WORD),
+        ("nFileExtension", wintypes.WORD),
+        ("lpstrDefExt", wintypes.LPCWSTR),
+        ("lCustData", wintypes.LPARAM),
+        ("lpfnHook", ctypes.c_void_p),
+        ("lpTemplateName", wintypes.LPCWSTR),
+        ("pvReserved", ctypes.c_void_p),
+        ("dwReserved", wintypes.DWORD),
+        ("FlagsEx", wintypes.DWORD),
+    ]
+
+
+OFN_EXPLORER = 0x00080000
+OFN_FILEMUSTEXIST = 0x00001000
+OFN_PATHMUSTEXIST = 0x00000800
+OFN_HIDEREADONLY = 0x00000004
+OFN_FORCESHOWHIDDEN = 0x10000000
 
 
 class DuplicateCleanerApp(tk.Tk):
@@ -81,7 +118,7 @@ class DuplicateCleanerApp(tk.Tk):
         ttk.Label(bottom, textvariable=self.status_var).pack(side="left", padx=(10, 0))
 
     def browse_folder(self):
-        """Open the normal Windows Explorer-style file dialog and use the selected file's parent folder."""
+        """Use the native Windows Explorer-style Open dialog and force all filesystem files visible."""
         current = self.folder_var.get().strip()
         if current and Path(current).is_dir():
             initial_dir = current
@@ -89,13 +126,43 @@ class DuplicateCleanerApp(tk.Tk):
             documents = Path.home() / "Documents"
             initial_dir = str(documents if documents.is_dir() else Path.home())
 
-        selected = filedialog.askopenfilename(
-            title="Browse to the folder you want to scan, then select any file in it",
-            initialdir=initial_dir,
-            filetypes=[("All files", "*.*")],
-        )
+        selected = self._windows_open_file_dialog(initial_dir)
         if selected:
             self.folder_var.set(os.path.normpath(str(Path(selected).parent)))
+
+    def _windows_open_file_dialog(self, initial_dir):
+        if os.name != "nt":
+            messagebox.showerror(APP_TITLE, "The Windows browse dialog is only available on Windows.")
+            return None
+
+        file_buffer = ctypes.create_unicode_buffer(32768)
+        title = "Browse to the folder you want to scan and select any file in it"
+        file_filter = "All files\0*.*\0\0"
+
+        dialog = OPENFILENAMEW()
+        dialog.lStructSize = ctypes.sizeof(OPENFILENAMEW)
+        dialog.hwndOwner = self.winfo_id()
+        dialog.lpstrFilter = file_filter
+        dialog.nFilterIndex = 1
+        dialog.lpstrFile = ctypes.cast(file_buffer, wintypes.LPWSTR)
+        dialog.nMaxFile = len(file_buffer)
+        dialog.lpstrInitialDir = str(initial_dir)
+        dialog.lpstrTitle = title
+        dialog.Flags = (
+            OFN_EXPLORER
+            | OFN_FILEMUSTEXIST
+            | OFN_PATHMUSTEXIST
+            | OFN_HIDEREADONLY
+            | OFN_FORCESHOWHIDDEN
+        )
+
+        comdlg32 = ctypes.windll.comdlg32
+        comdlg32.GetOpenFileNameW.argtypes = [ctypes.POINTER(OPENFILENAMEW)]
+        comdlg32.GetOpenFileNameW.restype = wintypes.BOOL
+
+        if comdlg32.GetOpenFileNameW(ctypes.byref(dialog)):
+            return file_buffer.value
+        return None
 
     def set_busy(self, busy):
         self._busy = busy
