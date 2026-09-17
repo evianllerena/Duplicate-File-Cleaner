@@ -13,8 +13,8 @@ class DuplicateCleanerApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title(APP_TITLE)
-        self.geometry("800x640")
-        self.minsize(740, 560)
+        self.geometry("760x590")
+        self.minsize(700, 520)
 
         self.folder_var = tk.StringVar()
         self.recursive_var = tk.BooleanVar(value=True)
@@ -23,7 +23,6 @@ class DuplicateCleanerApp(tk.Tk):
         self.duplicates_removed_var = tk.StringVar(value="0")
         self.space_recovered_var = tk.StringVar(value="0 B")
         self.status_var = tk.StringVar(value="Ready")
-        self.preview_var = tk.StringVar(value="No folder selected")
         self._busy = False
 
         self._build_ui()
@@ -33,20 +32,15 @@ class DuplicateCleanerApp(tk.Tk):
         main.pack(fill="both", expand=True)
 
         ttk.Label(main, text="Duplicate File Cleaner", font=("Segoe UI", 18, "bold")).pack(anchor="w")
-        ttk.Label(main, text="Select a folder, scan it, and remove exact duplicate files.").pack(anchor="w", pady=(2, 4))
-        ttk.Label(main, text="File types: ALL files are scanned (no extension filter).", font=("Segoe UI", 9, "italic")).pack(anchor="w")
-        ttk.Label(main, text="Note: Windows' folder picker only shows folders, not the files inside them.", font=("Segoe UI", 9, "italic")).pack(anchor="w", pady=(0, 14))
+        ttk.Label(main, text="Select a folder, scan it, and remove exact duplicate files.").pack(anchor="w", pady=(2, 14))
 
         folder_frame = ttk.Frame(main)
         folder_frame.pack(fill="x")
         ttk.Label(folder_frame, text="Folder:").pack(side="left")
         ttk.Entry(folder_frame, textvariable=self.folder_var).pack(side="left", fill="x", expand=True, padx=(8, 8))
-        ttk.Button(folder_frame, text="Browse Folder...", command=self.browse_folder).pack(side="left")
-        ttk.Button(folder_frame, text="Pick Any File...", command=self.browse_by_file).pack(side="left", padx=(6, 0))
+        ttk.Button(folder_frame, text="Browse...", command=self.browse_folder).pack(side="left")
 
-        ttk.Label(main, textvariable=self.preview_var, font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(8, 0))
-
-        ttk.Checkbutton(main, text="Include subfolders", variable=self.recursive_var, command=self.refresh_preview).pack(anchor="w", pady=(8, 12))
+        ttk.Checkbutton(main, text="Include subfolders", variable=self.recursive_var).pack(anchor="w", pady=(10, 12))
 
         button_frame = ttk.Frame(main)
         button_frame.pack(fill="x", pady=(0, 14))
@@ -67,7 +61,9 @@ class DuplicateCleanerApp(tk.Tk):
             ("Space recovered", self.space_recovered_var),
         ]):
             ttk.Label(stats, text=label + ":").grid(row=row, column=0, sticky="w", pady=3)
-            ttk.Label(stats, textvariable=variable, font=("Segoe UI", 10, "bold")).grid(row=row, column=1, sticky="w", padx=(12, 0), pady=3)
+            ttk.Label(stats, textvariable=variable, font=("Segoe UI", 10, "bold")).grid(
+                row=row, column=1, sticky="w", padx=(12, 0), pady=3
+            )
 
         log_frame = ttk.LabelFrame(main, text="Activity", padding=8)
         log_frame.pack(fill="both", expand=True)
@@ -85,49 +81,9 @@ class DuplicateCleanerApp(tk.Tk):
         ttk.Label(bottom, textvariable=self.status_var).pack(side="left", padx=(10, 0))
 
     def browse_folder(self):
-        folder = filedialog.askdirectory(
-            title="Select folder to scan - files are hidden in this Windows folder picker"
-        )
+        folder = filedialog.askdirectory(title="Select folder to scan", mustexist=True)
         if folder:
-            self.folder_var.set(folder)
-            self.refresh_preview()
-
-    def browse_by_file(self):
-        """Alternative browser that visibly shows files. Selecting any file chooses its parent folder."""
-        selected = filedialog.askopenfilename(
-            title="Pick any file inside the folder you want to scan",
-            filetypes=[("All files", "*")]
-        )
-        if selected:
-            folder = str(Path(selected).parent)
-            self.folder_var.set(folder)
-            self.refresh_preview()
-
-    def refresh_preview(self):
-        folder = self.folder_var.get().strip()
-        if not folder:
-            self.preview_var.set("No folder selected")
-            return
-
-        root = Path(folder)
-        if not root.exists() or not root.is_dir():
-            self.preview_var.set("Selected path is not a valid folder")
-            return
-
-        self.preview_var.set("Checking folder contents...")
-
-        def worker():
-            files, errors = self.get_files(root, self.recursive_var.get())
-            count = len(files)
-            if count:
-                text = f"Detected {count:,} file(s) in selected scan scope"
-            else:
-                text = "Detected 0 files in selected scan scope"
-            if errors:
-                text += f" | {len(errors)} item(s) could not be read"
-            self.after(0, self.preview_var.set, text)
-
-        threading.Thread(target=worker, daemon=True).start()
+            self.folder_var.set(os.path.normpath(folder))
 
     def set_busy(self, busy):
         self._busy = busy
@@ -170,7 +126,8 @@ class DuplicateCleanerApp(tk.Tk):
         if delete_duplicates:
             answer = messagebox.askyesno(
                 APP_TITLE,
-                "This will permanently delete exact duplicate files.\n\nOne copy of each duplicate set will be kept.\n\nContinue?"
+                "This will permanently delete exact duplicate files.\n\n"
+                "One copy of each duplicate set will be kept.\n\nContinue?"
             )
             if not answer:
                 return
@@ -183,28 +140,24 @@ class DuplicateCleanerApp(tk.Tk):
         self.status_var.set("Scanning...")
         self.set_busy(True)
 
-        threading.Thread(target=self.scan_worker, args=(root, self.recursive_var.get(), delete_duplicates), daemon=True).start()
+        threading.Thread(
+            target=self.scan_worker,
+            args=(root, self.recursive_var.get(), delete_duplicates),
+            daemon=True,
+        ).start()
 
     def scan_worker(self, root, recursive, delete_duplicates):
         try:
-            self.append_log(f"Scanning folder: {root}")
-            self.append_log("Extension filter: NONE - scanning all regular files")
-            self.append_log(f"Include subfolders: {'Yes' if recursive else 'No'}")
-
             files, scan_errors = self.get_files(root, recursive)
             self.after(0, self.total_files_var.set, str(len(files)))
             self.append_log(f"Files discovered: {len(files)}")
 
             if scan_errors:
-                self.append_log(f"Folders/files skipped because Windows denied access or reported an error: {len(scan_errors)}")
                 for item, error in scan_errors[:25]:
-                    self.append_log(f"  SKIPPED: {item} ({error})")
-                if len(scan_errors) > 25:
-                    self.append_log(f"  ...and {len(scan_errors) - 25} more")
+                    self.append_log(f"Skipped: {item} ({error})")
 
             if not files:
-                self.append_log("No files were discovered in the selected scan scope.")
-                self.append_log("Use 'Pick Any File...' if you want to visually confirm the folder contains files.")
+                self.append_log("No files were discovered in the selected folder.")
                 self.after(0, self.finish_scan, 0, 0, delete_duplicates)
                 return
 
@@ -226,7 +179,12 @@ class DuplicateCleanerApp(tk.Tk):
                     except (OSError, PermissionError) as exc:
                         self.append_log(f"Could not read: {path} ({exc})")
 
-            groups = [sorted(paths, key=lambda p: str(p).lower()) for paths in by_hash.values() if len(paths) > 1]
+            groups = [
+                sorted(paths, key=lambda p: str(p).lower())
+                for paths in by_hash.values()
+                if len(paths) > 1
+            ]
+
             duplicates_found = sum(len(group) - 1 for group in groups)
             self.after(0, self.duplicates_found_var.set, str(duplicates_found))
 
@@ -265,7 +223,7 @@ class DuplicateCleanerApp(tk.Tk):
 
     @staticmethod
     def get_files(root, recursive):
-        """Return every regular file in scope. There is intentionally no extension filter."""
+        """Return every regular file. No file-extension filtering is used."""
         files = []
         errors = []
 
@@ -312,12 +270,12 @@ class DuplicateCleanerApp(tk.Tk):
         self.space_recovered_var.set(self.human_size(recovered))
         self.status_var.set("Complete")
         self.set_busy(False)
-        self.refresh_preview()
 
         if delete_duplicates:
             messagebox.showinfo(
                 APP_TITLE,
-                f"Scan complete.\n\nTotal files scanned: {self.total_files_var.get()}\n"
+                f"Scan complete.\n\n"
+                f"Total files scanned: {self.total_files_var.get()}\n"
                 f"Duplicates found: {self.duplicates_found_var.get()}\n"
                 f"Duplicates removed: {removed}\n"
                 f"Space recovered: {self.human_size(recovered)}"
@@ -325,8 +283,10 @@ class DuplicateCleanerApp(tk.Tk):
         else:
             messagebox.showinfo(
                 APP_TITLE,
-                f"Scan complete.\n\nTotal files scanned: {self.total_files_var.get()}\n"
-                f"Duplicates found: {self.duplicates_found_var.get()}\n\nNo files were deleted."
+                f"Scan complete.\n\n"
+                f"Total files scanned: {self.total_files_var.get()}\n"
+                f"Duplicates found: {self.duplicates_found_var.get()}\n\n"
+                f"No files were deleted."
             )
 
 
