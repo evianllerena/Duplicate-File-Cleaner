@@ -13,8 +13,8 @@ class DuplicateCleanerApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title(APP_TITLE)
-        self.geometry("760x560")
-        self.minsize(700, 500)
+        self.geometry("760x590")
+        self.minsize(700, 520)
 
         self.folder_var = tk.StringVar()
         self.recursive_var = tk.BooleanVar(value=True)
@@ -32,7 +32,8 @@ class DuplicateCleanerApp(tk.Tk):
         main.pack(fill="both", expand=True)
 
         ttk.Label(main, text="Duplicate File Cleaner", font=("Segoe UI", 18, "bold")).pack(anchor="w")
-        ttk.Label(main, text="Select a folder, scan it, and remove exact duplicate files.").pack(anchor="w", pady=(2, 14))
+        ttk.Label(main, text="Select a folder, scan it, and remove exact duplicate files.").pack(anchor="w", pady=(2, 4))
+        ttk.Label(main, text="File types: ALL files are scanned (no extension filter).", font=("Segoe UI", 9, "italic")).pack(anchor="w", pady=(0, 14))
 
         folder_frame = ttk.Frame(main)
         folder_frame.pack(fill="x")
@@ -141,9 +142,26 @@ class DuplicateCleanerApp(tk.Tk):
 
     def scan_worker(self, root, recursive, delete_duplicates):
         try:
-            files = self.get_files(root, recursive)
+            self.append_log(f"Scanning folder: {root}")
+            self.append_log("Extension filter: NONE - scanning all regular files")
+            self.append_log(f"Include subfolders: {'Yes' if recursive else 'No'}")
+
+            files, scan_errors = self.get_files(root, recursive)
             self.after(0, self.total_files_var.set, str(len(files)))
             self.append_log(f"Files discovered: {len(files)}")
+
+            if scan_errors:
+                self.append_log(f"Folders/files skipped because Windows denied access or reported an error: {len(scan_errors)}")
+                for item, error in scan_errors[:25]:
+                    self.append_log(f"  SKIPPED: {item} ({error})")
+                if len(scan_errors) > 25:
+                    self.append_log(f"  ...and {len(scan_errors) - 25} more")
+
+            if not files:
+                self.append_log("No files were discovered in the selected scan scope.")
+                self.append_log("If the files are inside child folders, make sure 'Include subfolders' is checked.")
+                self.after(0, self.finish_scan, 0, 0, delete_duplicates)
+                return
 
             by_size = {}
             for path in files:
@@ -202,17 +220,27 @@ class DuplicateCleanerApp(tk.Tk):
 
     @staticmethod
     def get_files(root, recursive):
+        """Return every regular file in scope. There is intentionally no extension filter."""
         files = []
-        if recursive:
-            for current_root, _, filenames in os.walk(root):
-                current = Path(current_root)
-                for name in filenames:
-                    path = current / name
-                    if path.is_file():
-                        files.append(path)
-        else:
-            files = [p for p in root.iterdir() if p.is_file()]
-        return sorted(files, key=lambda p: str(p).lower())
+        errors = []
+
+        def scan_directory(directory):
+            try:
+                with os.scandir(directory) as entries:
+                    for entry in entries:
+                        try:
+                            if entry.is_file(follow_symlinks=True):
+                                files.append(Path(entry.path))
+                            elif recursive and entry.is_dir(follow_symlinks=False):
+                                scan_directory(Path(entry.path))
+                        except (OSError, PermissionError) as exc:
+                            errors.append((entry.path, str(exc)))
+            except (OSError, PermissionError) as exc:
+                errors.append((str(directory), str(exc)))
+
+        scan_directory(root)
+        files.sort(key=lambda p: str(p).lower())
+        return files, errors
 
     @staticmethod
     def sha256_file(path):
